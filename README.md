@@ -1,5 +1,7 @@
 # ChatGPT Import Plugin for Joplin
 
+<img src="doc/PromoTile.png" style="height: 180px;"/>
+
 Import your ChatGPT conversation history into Joplin as searchable, organized notes.
 
 ## Features
@@ -7,18 +9,9 @@ Import your ChatGPT conversation history into Joplin as searchable, organized no
 - Import ChatGPT export archives (ZIP files) directly into Joplin
 - Preserves conversation structure with user/assistant messages
 - Imports attached images, audio, and video files as Joplin resources
-- Supports both single `conversations.json` and split `conversations-XXX.json` files
-- Cleans up ChatGPT internal markup (entity references, image search queries)
 - Configurable note titles with date/time formatting
 - Optional collapsible sections for tool outputs
 - Preserves original conversation timestamps
-
-## Installation
-
-1. Download the plugin `.jpl` file from the releases page
-2. In Joplin, go to **Tools > Options > Plugins**
-3. Click the gear icon and select "Install from file"
-4. Select the downloaded `.jpl` file
 
 ## Usage
 

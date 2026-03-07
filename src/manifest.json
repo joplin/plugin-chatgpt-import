@@ -11,7 +11,7 @@
 	"keywords": ["chatgpt", "import", "ai", "conversation", "openai"],
 	"categories": ["integrations"],
 	"screenshots": [],
-	"icons": {
+	"icongs": {
 		"128": "doc/images/icon128.png"
 	},
 	"promo_tile": {

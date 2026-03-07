@@ -2,7 +2,11 @@
 
 <img src="doc/PromoTile.png" style="height: 180px;"/>
 
-Import your ChatGPT conversation history into Joplin as searchable, organized notes.
+ChatGPT is a useful tool, but its privacy policy may raise concerns, and you may not like the idea of having all your conversations stored on remote servers. These servers can be hacked, or the data could potentially be accessed by governments or other authorities.
+
+This plugin allows you to export your chat history from ChatGPT and import it into Joplin. Your conversations are then stored locally in your notes, either kept offline or securely synchronised using end-to-end encryption. Once your chats are safely archived in Joplin, you can delete them from ChatGPT with peace of mind.
+
+Because ChatGPT exports can be large, and you may prefer to synchronise them differently from your regular notes (or not synchronise them at all), you might want to [create a new profile](https://joplinapp.org/help/apps/profiles/) dedicated to this data.
 
 ## Features
 

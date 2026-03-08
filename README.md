@@ -39,9 +39,10 @@ Configure the plugin in **Tools > Options > ChatGPT Import**:
 | User name | Display name for user messages | `User` |
 | Assistant name | Display name for assistant messages | `ChatGPT` |
 | Note title format | Format string for note titles (see below) | `{date} {title}` |
-| Show date in note body | Display conversation date below the title | `true` |
+| Show date in note body | Display conversation date below the title | `false` |
 | Use collapsible sections | Wrap tool outputs in collapsible `<details>` tags | `true` |
 | Include thinking/reasoning | Include internal thinking messages from the assistant | `false` |
+| Quote user messages | Display user messages in blockquotes | `true` |
 
 ### Title Format Placeholders
 

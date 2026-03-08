@@ -36,10 +36,11 @@ describe('convertConversation', () => {
 		const result = convertConversation(conv);
 
 		expect(result.title).toBe('2024-01-01 Test Conversation');
-		expect(result.body).toContain('# Test Conversation');
-		expect(result.body).toContain('**User**:');
-		expect(result.body).toContain('Hello');
-		expect(result.body).toContain('**ChatGPT**:');
+		// User messages in blockquote with header
+		expect(result.body).toContain('> # User');
+		expect(result.body).toContain('> Hello');
+		// Assistant messages with header (not blockquote)
+		expect(result.body).toContain('# ChatGPT');
 		expect(result.body).toContain('Hi there!');
 	});
 
@@ -71,8 +72,34 @@ describe('convertConversation', () => {
 
 		const result = convertConversation(conv, options);
 
-		expect(result.body).toContain('**Alice**:');
-		expect(result.body).toContain('**GPT-4**:');
+		expect(result.body).toContain('# Alice');
+		expect(result.body).toContain('# GPT-4');
+	});
+
+	it('should not quote user messages when disabled', () => {
+		const conv = {
+			title: 'Test',
+			mapping: {
+				'msg1': {
+					message: {
+						author: { role: 'user' },
+						content: { parts: ['Hello'] },
+						create_time: 1704067200,
+					}
+				}
+			}
+		};
+
+		const options: ConversionOptions = {
+			quoteUserMessages: false,
+		};
+
+		const result = convertConversation(conv, options);
+
+		expect(result.body).toContain('# User');
+		expect(result.body).toContain('Hello');
+		expect(result.body).not.toContain('> #');
+		expect(result.body).not.toContain('> Hello');
 	});
 
 	it('should format title with custom format', () => {
@@ -213,5 +240,44 @@ describe('convertConversation', () => {
 
 		expect(result.createdTime).toBe(1704067200000);
 		expect(result.updatedTime).toBe(1704153600000);
+	});
+
+	it('should handle multimodal messages with images and text', () => {
+		const conv = {
+			title: 'Test',
+			mapping: {
+				'msg1': {
+					message: {
+						author: { role: 'user' },
+						content: {
+							content_type: 'multimodal_text',
+							parts: [
+								{
+									content_type: 'image_asset_pointer',
+									asset_pointer: 'file-service://file-img1'
+								},
+								{
+									content_type: 'image_asset_pointer',
+									asset_pointer: 'file-service://file-img2'
+								},
+								'which logo do you prefer?'
+							]
+						},
+						create_time: 1704067200,
+					}
+				}
+			}
+		};
+
+		const options: ConversionOptions = {
+			quoteUserMessages: false,
+		};
+
+		const result = convertConversation(conv, options);
+
+		expect(result.assets).toHaveLength(2);
+		expect(result.body).toContain('![Image](asset://file-img1)');
+		expect(result.body).toContain('![Image](asset://file-img2)');
+		expect(result.body).toContain('which logo do you prefer?');
 	});
 });

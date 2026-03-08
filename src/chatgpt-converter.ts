@@ -8,7 +8,7 @@ export interface ConversionOptions {
 	useFrontmatter?: boolean;
 	// Wrap tool outputs and thinking in collapsible <details> sections (default: true)
 	useCollapsibleThinking?: boolean;
-	// Show conversation date below the title (default: true)
+	// Show conversation date below the title (default: false)
 	includeDate?: boolean;
 	// Include internal thinking/reasoning messages from the assistant (default: false)
 	includeThinking?: boolean;
@@ -19,6 +19,8 @@ export interface ConversionOptions {
 	// - {time}: time in HH:MM format
 	// Default: "{date} {title}"
 	titleFormat?: string;
+	// Put user messages in blockquotes (default: true)
+	quoteUserMessages?: boolean;
 }
 
 // Internal config with resolved defaults
@@ -30,6 +32,7 @@ interface ResolvedConfig {
 	includeDate: boolean;
 	includeThinking: boolean;
 	titleFormat: string;
+	quoteUserMessages: boolean;
 }
 
 interface Thought {
@@ -77,6 +80,7 @@ interface Message {
 	content?: MessageContent;
 	recipient?: string;
 	create_time?: number;
+	channel?: string;
 	metadata?: {
 		is_visually_hidden_from_conversation?: boolean;
 	};
@@ -121,9 +125,10 @@ export function convertConversation(
 		assistantName: options.assistantName || 'ChatGPT',
 		useFrontmatter: options.useFrontmatter !== false,
 		useCollapsibleThinking: options.useCollapsibleThinking !== false,
-		includeDate: options.includeDate !== false,
+		includeDate: options.includeDate === true,
 		includeThinking: options.includeThinking === true,
 		titleFormat: options.titleFormat || '{date} {title}',
+		quoteUserMessages: options.quoteUserMessages !== false,
 	};
 
 	const context: ProcessingContext = {
@@ -150,19 +155,20 @@ export function parseConversationsJson(jsonContent: string): Conversation[] {
 
 function generateMarkdown(conv: Conversation, context: ProcessingContext): string {
 	let md = '';
-	const title = conv.title || 'Untitled';
 
-	md += `# ${title}\n\n`;
 	if (context.config.includeDate && conv.create_time) {
-		md += `<sub>${formatDate(conv.create_time)}</sub>\n\n`;
+		md += `Date: ${formatDateLong(conv.create_time)}\n\n---\n\n`;
 	}
-	md += '---\n\n';
 
 	// Extract and sort messages
 	const messages: Message[] = [];
 	for (const key in conv.mapping || {}) {
 		const item = conv.mapping![key];
 		if (item.message && !item.message.metadata?.is_visually_hidden_from_conversation) {
+			// Skip commentary channel messages (internal tool calls like image generation prompts)
+			if (item.message.channel === 'commentary') continue;
+			// Skip messages without timestamps (orphaned/initialization messages)
+			if (!item.message.create_time) continue;
 			messages.push(item.message);
 		}
 	}
@@ -171,10 +177,18 @@ function generateMarkdown(conv: Conversation, context: ProcessingContext): strin
 	// Process each message
 	for (const msg of messages) {
 		if (msg.author?.role === 'system') continue;
+		const role = msg.author?.role;
 		const author = getAuthorName(msg, context.config);
 		const content = getMessageContent(msg, context);
 		if (content.trim()) {
-			md += `**${author}**:\n\n${content}\n\n`;
+			if (role === 'user' && context.config.quoteUserMessages) {
+				// User messages in blockquote
+				const quotedContent = content.split('\n').map(line => `> ${line}`).join('\n');
+				md += `> # ${author}\n>\n${quotedContent}\n\n`;
+			} else {
+				// Assistant/tool messages with header (or user without quote)
+				md += `# ${author}\n\n${content}\n\n`;
+			}
 		}
 	}
 
@@ -288,7 +302,10 @@ function processParts(parts: (string | ContentPart)[], context: ProcessingContex
 		} else if (typeof part === 'object') {
 			const type = part.content_type;
 
-			if (type === 'image_asset_pointer') {
+			if (type === 'text' && part.text) {
+				// Explicit text content type
+				contentParts.push(cleanChatGptMarkup(processUrlsInText(part.text)));
+			} else if (type === 'image_asset_pointer') {
 				const fileId = extractFileId(part.asset_pointer || '');
 				if (fileId) {
 					context.assets.push({ fileId, type: 'image' });
@@ -403,9 +420,11 @@ function extractFileId(assetPointer: string): string | null {
 	return null;
 }
 
-function formatDate(ts: number): string {
+function formatDateLong(ts: number): string {
 	const d = new Date(ts * 1000);
-	return `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}-${d.getFullYear()}`;
+	const months = ['January', 'February', 'March', 'April', 'May', 'June',
+		'July', 'August', 'September', 'October', 'November', 'December'];
+	return `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`;
 }
 
 // Format note title using format string with placeholders

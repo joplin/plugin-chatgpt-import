@@ -40,10 +40,9 @@ async function getAllFiles(dir: string): Promise<string[]> {
 	return files;
 }
 
-async function findAssetFile(fileId: string, sourceDir: string): Promise<FileInfo | null> {
+// Find asset file from pre-scanned file list
+function findAssetFile(fileId: string, allFiles: string[]): FileInfo | null {
 	if (!fileId) return null;
-
-	const allFiles = await getAllFiles(sourceDir);
 
 	const searchStrategies: Array<{ test: (p: string) => boolean; type: FileInfo['type'] }> = [
 		{ test: (p) => p.toLowerCase().includes('dalle-generations') && p.includes(fileId), type: 'dalle' },
@@ -127,12 +126,12 @@ joplin.plugins.register({
 				description: 'Format for note titles. Placeholders: {title}, {date}, {date:FORMAT}, {time}. FORMAT can use YYYY, YY, MM, M, DD, D.',
 			},
 			'includeDate': {
-				value: true,
+				value: false,
 				type: SettingItemType.Bool,
 				section: 'chatgptImport',
 				public: true,
 				label: 'Show date in note body',
-				description: 'Display the conversation date below the title in the note body',
+				description: 'Display the conversation date at the top of the note body',
 			},
 			'useCollapsibleThinking': {
 				value: true,
@@ -149,6 +148,14 @@ joplin.plugins.register({
 				public: true,
 				label: 'Include thinking/reasoning',
 				description: 'Include internal thinking and reasoning messages from the assistant',
+			},
+			'quoteUserMessages': {
+				value: true,
+				type: SettingItemType.Bool,
+				section: 'chatgptImport',
+				public: true,
+				label: 'Quote user messages',
+				description: 'Display user messages in blockquotes to distinguish them from assistant messages',
 			},
 		});
 
@@ -194,8 +201,19 @@ joplin.plugins.register({
 
 					// Create a notebook for the import with unique name
 					let notebookTitle = 'ChatGPT Import';
-					const existingFolders = await joplin.data.get(['folders'], { fields: ['title'] });
-					const existingTitles = new Set(existingFolders.items.map((f: any) => f.title));
+
+					// Get all existing folder titles (handle pagination)
+					const existingTitles = new Set<string>();
+					let page = 1;
+					let hasMore = true;
+					while (hasMore) {
+						const result = await joplin.data.get(['folders'], { fields: ['title'], page });
+						for (const folder of result.items) {
+							existingTitles.add(folder.title);
+						}
+						hasMore = result.has_more;
+						page++;
+					}
 
 					if (existingTitles.has(notebookTitle)) {
 						let counter = 2;
@@ -218,15 +236,18 @@ joplin.plugins.register({
 						includeDate: await joplin.settings.value('includeDate'),
 						includeThinking: await joplin.settings.value('includeThinking'),
 						titleFormat: await joplin.settings.value('titleFormat'),
-					};
+						quoteUserMessages: await joplin.settings.value('quoteUserMessages'),
+						};
 
 					let importedCount = 0;
 					let errorCount = 0;
 					const totalCount = conversations.length;
-					let lastProgressLog = Date.now();
-					const progressIntervalMs = 2000;
 
 					console.info(`ChatGPT import: Starting import of ${totalCount} conversations...`);
+					console.info(`ChatGPT import: Scanning files in archive...`);
+					const allFiles = await getAllFiles(sourceDir);
+					console.info(`ChatGPT import: Found ${allFiles.length} files in archive`);
+					console.info(`ChatGPT import: Processing conversations...`);
 
 					for (const conv of conversations) {
 						try {
@@ -244,7 +265,7 @@ joplin.plugins.register({
 							// Process and attach assets
 							let updatedBody = converted.body;
 							for (const assetRef of converted.assets) {
-								const fileInfo = await findAssetFile(assetRef.fileId, sourceDir);
+								const fileInfo = findAssetFile(assetRef.fileId, allFiles);
 								if (fileInfo) {
 									try {
 										// Create resource from file
@@ -255,12 +276,12 @@ joplin.plugins.register({
 											[{ path: fileInfo.path }]
 										);
 
-										// Replace placeholder with actual resource link
+										// Replace placeholder URL with Joplin resource URL
+										// The markdown structure is already correct: ![Image](asset://fileId)
+										// We just need to replace the asset:// URL with :/${resourceId}
 										const placeholder = `asset://${assetRef.fileId}`;
-										const resourceLink = assetRef.type === 'image'
-											? `![${resource.title}](:/${resource.id})`
-											: `[${resource.title}](:/${resource.id})`;
-										updatedBody = updatedBody.replace(placeholder, resourceLink);
+										const resourceUrl = `:/${resource.id}`;
+										updatedBody = updatedBody.replace(placeholder, resourceUrl);
 									} catch (resourceError) {
 										console.error(`Failed to attach resource ${assetRef.fileId}:`, resourceError);
 									}
@@ -275,18 +296,14 @@ joplin.plugins.register({
 							}
 
 							importedCount++;
+							// Log every 10 conversations for visibility
+							if (importedCount % 10 === 0) {
+								const percent = Math.round((importedCount / totalCount) * 100);
+								console.info(`ChatGPT import: ${percent}% (${importedCount}/${totalCount})`);
+							}
 						} catch (convError) {
 							console.error(`Error converting conversation "${conv.title}":`, convError);
 							errorCount++;
-						}
-
-						// Log progress periodically
-						const now = Date.now();
-						if (now - lastProgressLog >= progressIntervalMs) {
-							const processed = importedCount + errorCount;
-							const percent = Math.round((processed / totalCount) * 100);
-							console.info(`ChatGPT import: ${percent}% complete (${processed}/${totalCount})`);
-							lastProgressLog = now;
 						}
 					}
 

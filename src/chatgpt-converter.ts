@@ -156,6 +156,20 @@ export function parseConversationsJson(jsonContent: string): Conversation[] {
 function generateMarkdown(conv: Conversation, context: ProcessingContext): string {
 	let md = '';
 
+	// Add YAML frontmatter if enabled
+	if (context.config.useFrontmatter) {
+		md += '---\n';
+		md += `title: "${(conv.title || 'Untitled').replace(/"/g, '\\"')}"\n`;
+		if (conv.create_time) {
+			md += `created: ${new Date(conv.create_time * 1000).toISOString()}\n`;
+		}
+		if (conv.update_time) {
+			md += `updated: ${new Date(conv.update_time * 1000).toISOString()}\n`;
+		}
+		md += `source: ChatGPT\n`;
+		md += '---\n\n';
+	}
+
 	if (context.config.includeDate && conv.create_time) {
 		md += `Date: ${formatDateLong(conv.create_time)}\n\n---\n\n`;
 	}
@@ -424,7 +438,7 @@ function formatDateLong(ts: number): string {
 	const d = new Date(ts * 1000);
 	const months = ['January', 'February', 'March', 'April', 'May', 'June',
 		'July', 'August', 'September', 'October', 'November', 'December'];
-	return `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`;
+	return `${d.getUTCDate()} ${months[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
 }
 
 // Format note title using format string with placeholders
@@ -441,11 +455,11 @@ function formatNoteTitle(conv: Conversation, format: string): string {
 
 	if (ts) {
 		const d = new Date(ts * 1000);
-		const year = d.getFullYear();
-		const month = d.getMonth() + 1;
-		const day = d.getDate();
-		const hours = d.getHours();
-		const minutes = d.getMinutes();
+		const year = d.getUTCFullYear();
+		const month = d.getUTCMonth() + 1;
+		const day = d.getUTCDate();
+		const hours = d.getUTCHours();
+		const minutes = d.getUTCMinutes();
 
 		// Replace {date} with default YYYY-MM-DD
 		result = result.replace(/\{date\}/g,

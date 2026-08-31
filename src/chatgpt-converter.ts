@@ -83,7 +83,17 @@ interface Message {
 	channel?: string;
 	metadata?: {
 		is_visually_hidden_from_conversation?: boolean;
+		attachments?: MessageAttachment[];
 	};
+}
+
+// An attachment declared in message metadata. Non-image uploads (PDF, docx,
+// text files) appear only here - they have no asset pointer in the message
+// content - so they must be picked up separately.
+interface MessageAttachment {
+	id?: string;
+	name?: string;
+	mime_type?: string;
 }
 
 interface MappingItem {
@@ -91,6 +101,11 @@ interface MappingItem {
 }
 
 interface Conversation {
+	id?: string;
+	conversation_id?: string;
+	// Despite its name this is the project ("gizmo") the conversation belongs
+	// to, when it was created inside a ChatGPT project.
+	conversation_template_id?: string;
 	title?: string;
 	create_time?: number;
 	update_time?: number;
@@ -103,16 +118,25 @@ export interface ConvertedConversation {
 	createdTime: number;
 	updatedTime: number;
 	assets: AssetReference[];
+	// Source conversation id, kept so assets can be linked back to it and so
+	// the note can record where it came from.
+	conversationId: string;
+	// Project id, or empty when the conversation is not in a project.
+	projectId: string;
 }
 
 export interface AssetReference {
 	fileId: string;
-	type: 'image' | 'audio' | 'video' | 'dalle';
+	type: 'image' | 'audio' | 'video' | 'dalle' | 'file';
+	// Name as shown in ChatGPT, when known
+	name?: string;
 }
 
 interface ProcessingContext {
 	config: ResolvedConfig;
 	assets: AssetReference[];
+	// File ids already emitted for the message being processed
+	emitted: Record<string, boolean>;
 }
 
 // Convert a single ChatGPT conversation to Joplin-compatible format
@@ -134,6 +158,7 @@ export function convertConversation(
 	const context: ProcessingContext = {
 		config,
 		assets: [],
+		emitted: {},
 	};
 
 	const body = generateMarkdown(conv, context);
@@ -145,6 +170,8 @@ export function convertConversation(
 		createdTime: conv.create_time ? conv.create_time * 1000 : Date.now(),
 		updatedTime: conv.update_time ? conv.update_time * 1000 : Date.now(),
 		assets: context.assets,
+		conversationId: conv.id || conv.conversation_id || '',
+		projectId: conv.conversation_template_id || '',
 	};
 }
 
@@ -179,7 +206,12 @@ function generateMarkdown(conv: Conversation, context: ProcessingContext): strin
 		if (msg.author?.role === 'system') continue;
 		const role = msg.author?.role;
 		const author = getAuthorName(msg, context.config);
-		const content = getMessageContent(msg, context);
+		context.emitted = {};
+		let content = getMessageContent(msg, context);
+		const attachmentLinks = processAttachments(msg, context);
+		if (attachmentLinks) {
+			content = content.trim() ? `${content}\n\n${attachmentLinks}` : attachmentLinks;
+		}
 		if (content.trim()) {
 			if (role === 'user' && context.config.quoteUserMessages) {
 				// User messages in blockquote
@@ -292,6 +324,35 @@ function getMessageContent(msg: Message, context: ProcessingContext): string {
 	return '';
 }
 
+// Emit links for files attached to a message. Images referenced by an asset
+// pointer in the message content are already handled by processParts, so only
+// the remaining attachments are emitted here - in practice PDFs, Office
+// documents and text uploads, which have no asset pointer at all.
+function processAttachments(msg: Message, context: ProcessingContext): string {
+	const attachments = msg.metadata?.attachments;
+	if (!attachments?.length) return '';
+
+	const links: string[] = [];
+	for (const attachment of attachments) {
+		const fileId = attachment.id;
+		if (!fileId || context.emitted[fileId]) continue;
+		context.emitted[fileId] = true;
+
+		const name = attachment.name || 'Attachment';
+		const isImage = (attachment.mime_type || '').startsWith('image/');
+		context.assets.push({ fileId, type: isImage ? 'image' : 'file', name });
+		const prefix = isImage ? '!' : '';
+		links.push(`${prefix}[${escapeLinkText(name)}](asset://${fileId})`);
+	}
+
+	return links.join('\n');
+}
+
+// Escape characters that would break out of a markdown link label
+export function escapeLinkText(text: string): string {
+	return text.replace(/\[/g, '\\[').replace(/\]/g, '\\]');
+}
+
 function processParts(parts: (string | ContentPart)[], context: ProcessingContext): string {
 	if (!parts?.length) return '';
 	const contentParts: string[] = [];
@@ -308,9 +369,12 @@ function processParts(parts: (string | ContentPart)[], context: ProcessingContex
 			} else if (type === 'image_asset_pointer') {
 				const fileId = extractFileId(part.asset_pointer || '');
 				if (fileId) {
+					context.emitted[fileId] = true;
 					context.assets.push({ fileId, type: 'image' });
 					// Placeholder - will be replaced when asset is attached
-					contentParts.push(`![Image](asset://${fileId})`);
+					// The real file name is only known once the archive has
+					// been indexed, so the label is filled in at import time.
+					contentParts.push(`![](asset://${fileId})`);
 				}
 			} else if (type === 'audio_asset_pointer' || type === 'real_time_user_audio_video_asset_pointer') {
 				// Process audio
@@ -331,6 +395,7 @@ function processParts(parts: (string | ContentPart)[], context: ProcessingContex
 				if (audioPointer) {
 					const fileId = extractFileId(audioPointer);
 					if (fileId) {
+						context.emitted[fileId] = true;
 						context.assets.push({ fileId, type: 'audio' });
 						const durText = audioDuration ? ` (${audioDuration.toFixed(1)}s)` : '';
 						contentParts.push(`[Audio${durText}](asset://${fileId})`);
@@ -344,6 +409,7 @@ function processParts(parts: (string | ContentPart)[], context: ProcessingContex
 					if (videoPointer) {
 						const fileId = extractFileId(videoPointer);
 						if (fileId) {
+							context.emitted[fileId] = true;
 							context.assets.push({ fileId, type: 'video' });
 							contentParts.push(`[Video](asset://${fileId})`);
 						}

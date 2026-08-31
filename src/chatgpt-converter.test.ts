@@ -226,7 +226,7 @@ describe('convertConversation', () => {
 		expect(result.assets).toHaveLength(1);
 		expect(result.assets[0].fileId).toBe('file-abc123');
 		expect(result.assets[0].type).toBe('image');
-		expect(result.body).toContain('![Image](asset://file-abc123)');
+		expect(result.body).toContain('![](asset://file-abc123)');
 	});
 
 	it('should preserve timestamps', () => {
@@ -276,8 +276,101 @@ describe('convertConversation', () => {
 		const result = convertConversation(conv, options);
 
 		expect(result.assets).toHaveLength(2);
-		expect(result.body).toContain('![Image](asset://file-img1)');
-		expect(result.body).toContain('![Image](asset://file-img2)');
+		expect(result.body).toContain('![](asset://file-img1)');
+		expect(result.body).toContain('![](asset://file-img2)');
 		expect(result.body).toContain('which logo do you prefer?');
+	});
+});
+
+describe('attachments', () => {
+	const conversationWith = (attachments: any[], parts: any[] = ['See attached']) => ({
+		id: 'conv-1',
+		title: 'Test',
+		create_time: 1704067200,
+		mapping: {
+			msg1: {
+				message: {
+					author: { role: 'user' },
+					content: { parts },
+					metadata: { attachments },
+					create_time: 1704067200,
+				},
+			},
+		},
+	});
+
+	it('should link non-image attachments that have no asset pointer', () => {
+		const result = convertConversation(conversationWith([
+			{ id: 'file_00000000aaaa', name: 'report.pdf', mime_type: 'application/pdf' },
+		]));
+
+		expect(result.body).toContain('[report.pdf](asset://file_00000000aaaa)');
+		// Not an image, so no leading exclamation mark
+		expect(result.body).not.toContain('![report.pdf]');
+		expect(result.assets).toEqual([
+			{ fileId: 'file_00000000aaaa', type: 'file', name: 'report.pdf' },
+		]);
+	});
+
+	it('should embed image attachments', () => {
+		const result = convertConversation(conversationWith([
+			{ id: 'file_00000000bbbb', name: 'photo.png', mime_type: 'image/png' },
+		]));
+
+		expect(result.body).toContain('![photo.png](asset://file_00000000bbbb)');
+		expect(result.assets[0].type).toBe('image');
+	});
+
+	it('should not duplicate an attachment already referenced by an asset pointer', () => {
+		const result = convertConversation(conversationWith(
+			[{ id: 'file_00000000cccc', name: 'photo.png', mime_type: 'image/png' }],
+			[
+				{
+					content_type: 'image_asset_pointer',
+					asset_pointer: 'sediment://file_00000000cccc',
+				},
+			]
+		));
+
+		expect(result.assets).toHaveLength(1);
+		expect(result.assets[0].type).toBe('image');
+		expect(result.body.match(/asset:\/\/file_00000000cccc/g)).toHaveLength(1);
+	});
+
+	it('should keep an attachment on a message that has no text', () => {
+		const result = convertConversation(conversationWith(
+			[{ id: 'file_00000000dddd', name: 'notes.md', mime_type: 'text/markdown' }],
+			[]
+		));
+
+		expect(result.body).toContain('[notes.md](asset://file_00000000dddd)');
+	});
+
+	it('should escape brackets in attachment names', () => {
+		const result = convertConversation(conversationWith([
+			{ id: 'file_00000000eeee', name: 'report [final].pdf', mime_type: 'application/pdf' },
+		]));
+
+		expect(result.body).toContain('[report \\[final\\].pdf](asset://file_00000000eeee)');
+	});
+});
+
+describe('conversation identifiers', () => {
+	it('should expose the conversation and project ids', () => {
+		const result = convertConversation({
+			id: 'conv-1',
+			conversation_template_id: 'g-p-abc123',
+			title: 'Test',
+			mapping: {},
+		});
+
+		expect(result.conversationId).toBe('conv-1');
+		expect(result.projectId).toBe('g-p-abc123');
+	});
+
+	it('should leave the project id empty outside a project', () => {
+		const result = convertConversation({ id: 'conv-2', title: 'Test', mapping: {} });
+		expect(result.conversationId).toBe('conv-2');
+		expect(result.projectId).toBe('');
 	});
 });

@@ -58,3 +58,51 @@ Since users delete the archive after importing, the ids are stored as note
 user data (`chatgpt.projectId`, `chatgpt.conversationId`) via
 `joplin.data.userDataSet`, which is synced and not user-visible. Without this
 the project grouping is lost permanently.
+
+# Claude export format notes
+
+## Delivery
+
+Claude provides a `manifest-<ids>.json` listing one zip per category and part
+(`conversations-000.zip`, `projects-000.zip`, `frames-000.zip`,
+`light_metadata-000.zip`; large accounts get `-001`, `-002`...). The plugin
+**cannot download them**: the `export_url` links sit behind a Cloudflare
+challenge and `cross-origin-resource-policy: same-origin`, and may only work
+once. The user downloads the zips into one folder, and the importer takes
+that folder. Every part contains the same file names,
+so each zip must be extracted into its own directory.
+
+## Content
+
+| File | Contents |
+| --- | --- |
+| `conversations.json` | `uuid`, `name`, `created_at` (ISO), `chat_messages[]` |
+| `projects/<uuid>.json` | `name`, `description`, `prompt_template` (instructions), `docs[]` with full `content`. Not imported, see below. |
+| `artifacts/<id>/artifact.json` + `page.md` + `comments.json` | Claude docs (`kind: page`). Other kinds are bundled HTML/JS apps and are skipped. |
+| `light_metadata` | Account and login history, not imported |
+
+Message `content[]` blocks: `text` (with `citations`), `thinking` (the text is
+almost always empty - only `summaries[]` survive), `tool_use` / `tool_result`
+(paired by `id` / `tool_use_id`), `image` / `document` (by `file_uuid`), and
+`injected_prompt_block`, which is hidden app context and must never be shown.
+
+- **No file bytes at all.** Images and documents are only a `file_uuid` and an
+  often empty `file_name`. Pasted text is the exception: `attachments[]` holds
+  the full `extracted_content`.
+- **No conversation -> project link.** Project names are present (unlike
+  ChatGPT) but no conversation carries a project id. Projects are therefore
+  not imported at all: on their own they are just unconnected metadata.
+- **Docs link to conversations only through their id** appearing inside the
+  calls and results of the docs tools (`mcp__Claude_Docs__*`, `Artifact`).
+  Only those tools count: the id also shows up in unrelated output, such as a
+  `conversation_search` result in another conversation, or in hidden context.
+  Each doc is embedded after the last assistant message that touched it; docs
+  no conversation touched become standalone notes.
+- `page.md` starts with the page name as an H1, which can be stale (an older
+  title), and a single-tab doc then repeats its title as the tab heading.
+- Messages form a tree via `parent_message_uuid` (root parent is
+  `00000000-0000-4000-8000-000000000000`); editing a message leaves the old
+  branch in the export. Follow the chain back from the latest message.
+- Some conversations are exported with every message empty (`text: ""`,
+  `content: []`); all untitled ones in the sample were like this. They are
+  skipped.

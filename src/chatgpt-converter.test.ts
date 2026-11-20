@@ -374,3 +374,59 @@ describe('conversation identifiers', () => {
 		expect(result.projectId).toBe('');
 	});
 });
+
+describe('tool call modes', () => {
+	const toolConversation = () => ({
+		title: 'Test',
+		mapping: {
+			'msg1': { message: { author: { role: 'user' }, content: { parts: ['Search and draw'] }, create_time: 1 } },
+			'msg2': { message: {
+				author: { role: 'assistant' }, recipient: 'web.run',
+				content: { content_type: 'code', text: '{"query": "joplin"}' }, create_time: 2,
+			} },
+			'msg3': { message: {
+				author: { role: 'tool', name: 'web.run' },
+				content: { content_type: 'text', parts: ['Search results text'] }, create_time: 3,
+			} },
+			'msg4': { message: {
+				author: { role: 'tool', name: 'dalle.text2im' },
+				content: { content_type: 'multimodal_text', parts: [
+					{ content_type: 'image_asset_pointer', asset_pointer: 'sediment://file_00000000aaaa' },
+					'Generated image caption',
+				] }, create_time: 4,
+			} },
+			'msg5': { message: { author: { role: 'assistant' }, recipient: 'all', content: { parts: ['Done'] }, create_time: 5 } },
+		},
+	});
+
+	it('should hide tool calls by default but keep generated images', () => {
+		const result = convertConversation(toolConversation());
+
+		expect(result.body).not.toContain('"query"');
+		expect(result.body).not.toContain('Search results text');
+		expect(result.body).not.toContain('Generated image caption');
+		expect(result.body).not.toContain('Tool');
+		expect(result.body).toContain('![](asset://file_00000000aaaa)');
+		expect(result.assets).toEqual([{ fileId: 'file_00000000aaaa', type: 'image' }]);
+		expect(result.body).toContain('Done');
+	});
+
+	it('should show the call without its output', () => {
+		const result = convertConversation(toolConversation(), { toolCalls: 'callOnly' });
+
+		expect(result.body).toContain('# ChatGPT (tool execution)');
+		expect(result.body).toContain('"query"');
+		expect(result.body).not.toContain('Search results text');
+		expect(result.body).toContain('![](asset://file_00000000aaaa)');
+	});
+
+	it('should show everything in full mode', () => {
+		const result = convertConversation(toolConversation(), { toolCalls: 'full' });
+
+		expect(result.body).toContain('"query"');
+		expect(result.body).toContain('# Tool (web.run)');
+		expect(result.body).toContain('Search results text');
+		expect(result.body).toContain('Generated image caption');
+		expect(result.body).toContain('![](asset://file_00000000aaaa)');
+	});
+});

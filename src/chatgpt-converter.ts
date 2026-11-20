@@ -1,39 +1,10 @@
-// Options for converting ChatGPT conversations to Markdown
-export interface ConversionOptions {
-	// Display name for user messages (default: "User")
-	userName?: string;
-	// Display name for assistant messages (default: "ChatGPT")
-	assistantName?: string;
-	// Include YAML frontmatter with metadata (default: true)
-	useFrontmatter?: boolean;
-	// Wrap tool outputs and thinking in collapsible <details> sections (default: true)
-	useCollapsibleThinking?: boolean;
-	// Show conversation date below the title (default: false)
-	includeDate?: boolean;
-	// Include internal thinking/reasoning messages from the assistant (default: false)
-	includeThinking?: boolean;
-	// Format string for note titles. Supports placeholders:
-	// - {title}: conversation title
-	// - {date}: date in YYYY-MM-DD format
-	// - {date:FORMAT}: date with custom format (YYYY, YY, MM, DD, M, D)
-	// - {time}: time in HH:MM format
-	// Default: "{date} {title}"
-	titleFormat?: string;
-	// Put user messages in blockquotes (default: true)
-	quoteUserMessages?: boolean;
-}
+import {
+	ConversionOptions, ResolvedConfig, resolveConfig, renderMessage, escapeLinkText,
+	formatDateLong, formatNoteTitle,
+} from './markdown-utils';
 
-// Internal config with resolved defaults
-interface ResolvedConfig {
-	userName: string;
-	assistantName: string;
-	useFrontmatter: boolean;
-	useCollapsibleThinking: boolean;
-	includeDate: boolean;
-	includeThinking: boolean;
-	titleFormat: string;
-	quoteUserMessages: boolean;
-}
+export type { ConversionOptions };
+export { escapeLinkText };
 
 interface Thought {
 	summary?: string;
@@ -144,16 +115,7 @@ export function convertConversation(
 	conv: Conversation,
 	options: ConversionOptions = {}
 ): ConvertedConversation {
-	const config: ResolvedConfig = {
-		userName: options.userName || 'User',
-		assistantName: options.assistantName || 'ChatGPT',
-		useFrontmatter: options.useFrontmatter !== false,
-		useCollapsibleThinking: options.useCollapsibleThinking !== false,
-		includeDate: options.includeDate === true,
-		includeThinking: options.includeThinking === true,
-		titleFormat: options.titleFormat || '{date} {title}',
-		quoteUserMessages: options.quoteUserMessages !== false,
-	};
+	const config = resolveConfig(options, 'ChatGPT');
 
 	const context: ProcessingContext = {
 		config,
@@ -162,7 +124,8 @@ export function convertConversation(
 	};
 
 	const body = generateMarkdown(conv, context);
-	const noteTitle = formatNoteTitle(conv, config.titleFormat);
+	const noteTitle = formatNoteTitle(
+		conv.title || 'Untitled', conv.create_time ? conv.create_time * 1000 : null, config.titleFormat);
 
 	return {
 		title: noteTitle,
@@ -184,7 +147,7 @@ function generateMarkdown(conv: Conversation, context: ProcessingContext): strin
 	let md = '';
 
 	if (context.config.includeDate && conv.create_time) {
-		md += `Date: ${formatDateLong(conv.create_time)}\n\n---\n\n`;
+		md += `Date: ${formatDateLong(conv.create_time * 1000)}\n\n---\n\n`;
 	}
 
 	// Extract and sort messages
@@ -204,6 +167,7 @@ function generateMarkdown(conv: Conversation, context: ProcessingContext): strin
 	// Process each message
 	for (const msg of messages) {
 		if (msg.author?.role === 'system') continue;
+		if (context.config.toolCalls === 'hide' && isToolCall(msg)) continue;
 		const role = msg.author?.role;
 		const author = getAuthorName(msg, context.config);
 		context.emitted = {};
@@ -213,18 +177,17 @@ function generateMarkdown(conv: Conversation, context: ProcessingContext): strin
 			content = content.trim() ? `${content}\n\n${attachmentLinks}` : attachmentLinks;
 		}
 		if (content.trim()) {
-			if (role === 'user' && context.config.quoteUserMessages) {
-				// User messages in blockquote
-				const quotedContent = content.split('\n').map(line => `> ${line}`).join('\n');
-				md += `> # ${author}\n>\n${quotedContent}\n\n`;
-			} else {
-				// Assistant/tool messages with header (or user without quote)
-				md += `# ${author}\n\n${content}\n\n`;
-			}
+			md += renderMessage(author, content, role === 'user', context.config);
 		}
 	}
 
 	return md;
+}
+
+// A message from the assistant addressed to a tool rather than to the user,
+// for example a web search or a code interpreter call.
+function isToolCall(msg: Message): boolean {
+	return msg.author?.role === 'assistant' && !!msg.recipient && msg.recipient !== 'all';
 }
 
 function getAuthorName(msg: Message, config: ResolvedConfig): string {
@@ -234,7 +197,11 @@ function getAuthorName(msg: Message, config: ResolvedConfig): string {
 	const contentType = content.content_type || '';
 
 	if (role === 'user') return config.userName;
-	if (role === 'tool') return `Tool (${msg.author?.name || 'tool'})`;
+	if (role === 'tool') {
+		// Without the output, only media from the tool remains, such as a
+		// generated image, which reads as coming from the assistant.
+		return config.toolCalls === 'full' ? `Tool (${msg.author?.name || 'tool'})` : config.assistantName;
+	}
 	if (contentType === 'user_editable_context') return 'System (context)';
 
 	const baseName = config.assistantName;
@@ -257,6 +224,12 @@ function getMessageContent(msg: Message, context: ProcessingContext): string {
 
 	// Handle tool messages
 	if (role === 'tool') {
+		// Generated images arrive as tool output, so media is kept even when
+		// the output itself is not.
+		if (context.config.toolCalls !== 'full') {
+			return content.parts ? processParts(content.parts, context, true) : '';
+		}
+
 		const toolName = msg.author?.name || 'tool';
 		let processedContent = '';
 		if (content.parts) {
@@ -348,23 +321,22 @@ function processAttachments(msg: Message, context: ProcessingContext): string {
 	return links.join('\n');
 }
 
-// Escape characters that would break out of a markdown link label
-export function escapeLinkText(text: string): string {
-	return text.replace(/\[/g, '\\[').replace(/\]/g, '\\]');
-}
-
-function processParts(parts: (string | ContentPart)[], context: ProcessingContext): string {
+// When mediaOnly is set, text is skipped and only images, audio and video are
+// rendered.
+function processParts(parts: (string | ContentPart)[], context: ProcessingContext, mediaOnly = false): string {
 	if (!parts?.length) return '';
 	const contentParts: string[] = [];
 
 	for (const part of parts) {
 		if (typeof part === 'string') {
+			if (mediaOnly) continue;
 			contentParts.push(cleanChatGptMarkup(processUrlsInText(part)));
 		} else if (typeof part === 'object') {
 			const type = part.content_type;
 
 			if (type === 'text' && part.text) {
 				// Explicit text content type
+				if (mediaOnly) continue;
 				contentParts.push(cleanChatGptMarkup(processUrlsInText(part.text)));
 			} else if (type === 'image_asset_pointer') {
 				const fileId = extractFileId(part.asset_pointer || '');
@@ -415,7 +387,7 @@ function processParts(parts: (string | ContentPart)[], context: ProcessingContex
 						}
 					}
 				}
-			} else if (part.text) {
+			} else if (part.text && !mediaOnly) {
 				contentParts.push(cleanChatGptMarkup(processUrlsInText(part.text)));
 			}
 		}
@@ -484,60 +456,4 @@ function extractFileId(assetPointer: string): string | null {
 	match = assetPointer.match(/sediment:\/\/file_([0-9a-fA-F]+)/);
 	if (match) return `file_${match[1]}`;
 	return null;
-}
-
-function formatDateLong(ts: number): string {
-	const d = new Date(ts * 1000);
-	const months = ['January', 'February', 'March', 'April', 'May', 'June',
-		'July', 'August', 'September', 'October', 'November', 'December'];
-	return `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`;
-}
-
-// Format note title using format string with placeholders
-// Supported: {title}, {date}, {date:FORMAT}, {time}
-// FORMAT can include: YYYY, YY, MM, M, DD, D
-function formatNoteTitle(conv: Conversation, format: string): string {
-	const title = conv.title || 'Untitled';
-	const ts = conv.create_time;
-
-	let result = format;
-
-	// Replace {title}
-	result = result.replace(/\{title\}/g, title);
-
-	if (ts) {
-		const d = new Date(ts * 1000);
-		const year = d.getFullYear();
-		const month = d.getMonth() + 1;
-		const day = d.getDate();
-		const hours = d.getHours();
-		const minutes = d.getMinutes();
-
-		// Replace {date} with default YYYY-MM-DD
-		result = result.replace(/\{date\}/g,
-			`${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`);
-
-		// Replace {date:FORMAT} with custom format
-		result = result.replace(/\{date:([^}]+)\}/g, (_match, fmt: string) => {
-			let formatted = fmt;
-			formatted = formatted.replace(/YYYY/g, String(year));
-			formatted = formatted.replace(/YY/g, String(year).slice(-2));
-			formatted = formatted.replace(/MM/g, String(month).padStart(2, '0'));
-			formatted = formatted.replace(/M/g, String(month));
-			formatted = formatted.replace(/DD/g, String(day).padStart(2, '0'));
-			formatted = formatted.replace(/D/g, String(day));
-			return formatted;
-		});
-
-		// Replace {time}
-		result = result.replace(/\{time\}/g,
-			`${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`);
-	} else {
-		// No timestamp - remove date/time placeholders
-		result = result.replace(/\{date(:[^}]+)?\}/g, '');
-		result = result.replace(/\{time\}/g, '');
-	}
-
-	// Clean up extra spaces
-	return result.replace(/\s+/g, ' ').trim();
 }

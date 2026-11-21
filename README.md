@@ -1,24 +1,32 @@
-# ChatGPT Import Plugin for Joplin
+# AI Chat Import Plugin for Joplin
 
 <img src="doc/PromoTile.png" style="height: 180px;"/>
 
-ChatGPT is a useful tool, but its privacy policy may raise concerns, and you may not like the idea of having all your conversations stored on remote servers. These servers can be hacked, or the data could potentially be accessed by governments or other authorities.
+AI assistants such as ChatGPT and Claude are useful tools, but their privacy policies may raise concerns, and you may not like the idea of having all your conversations stored on remote servers. These servers can be hacked, or the data could potentially be accessed by governments or other authorities.
 
-This plugin allows you to export your chat history from ChatGPT and import it into Joplin. Your conversations are then stored locally in your notes, either kept offline or securely synchronised using end-to-end encryption. Once your chats are safely archived in Joplin, you can delete them from ChatGPT with peace of mind.
+This plugin allows you to export your chat history from ChatGPT or Claude and import it into Joplin. Your conversations are then stored locally in your notes, either kept offline or securely synchronised using end-to-end encryption. Once your chats are safely archived in Joplin, you can delete them from the service with peace of mind.
 
-Because ChatGPT exports can be large, and you may prefer to synchronise them differently from your regular notes (or not synchronise them at all), you might want to [create a new profile](https://joplinapp.org/help/apps/profiles/) dedicated to this data.
+Because these exports can be large, and you may prefer to synchronise them differently from your regular notes (or not synchronise them at all), you might want to [create a new profile](https://joplinapp.org/help/apps/profiles/) dedicated to this data.
+
+## Supported services
+
+| Service | What is imported |
+|---------|------------------|
+| ChatGPT | Conversations, with attached and generated images, audio and video as Joplin resources. Files from the ChatGPT library are attached to the conversation that created them, or collected in a "ChatGPT Library" note. |
+| Claude | Conversations, pasted text, and the docs Claude created or edited. Claude exports do not contain uploaded files. |
 
 ## Features
 
-- Import ChatGPT export archives (ZIP files) directly into Joplin
-- Import Claude exports, including the docs created by Claude
+- Both services produce notes in the same format
 - Preserves conversation structure with user/assistant messages
-- Imports attached images, audio, and video files as Joplin resources
-- Configurable note titles with date/time formatting
-- Optional collapsible sections for tool outputs
 - Preserves original conversation timestamps
+- Configurable note titles with date/time formatting
+- Tool calls (web searches, file reads, connectors...) can be shown in full, reduced to the call, or hidden
+- Optional collapsible sections for tool outputs and thinking
 
 ## Usage
+
+### ChatGPT
 
 1. Export your data from ChatGPT:
    - Go to ChatGPT Settings > Data Controls > Export Data

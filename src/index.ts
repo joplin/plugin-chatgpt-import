@@ -113,6 +113,6 @@ joplin.plugins.register({
 			onExec: async (context: ImportContext) => importClaudeExport(context),
 		});
 
-		console.info('ChatGPT Import plugin started');
+		console.info('AI Chat Import plugin started');
 	},
 });
